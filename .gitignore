@@ -1,0 +1,28 @@
+# Dependencies / build
+node_modules/
+dist/
+build/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+backend/.venv/
+
+# Local env (do not commit secrets)
+.env
+backend/.env
+frontend/.env
+
+# Supabase local
+supabase/.temp/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Tools / downloads
+tools/
+
