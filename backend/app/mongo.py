@@ -38,6 +38,9 @@ def submissions_col():
 def messages_col():
     return db()["messages"]
 
+def class_materials_col():
+    return db()["class_materials"]
+
 
 def ensure_indexes():
     """
@@ -58,4 +61,7 @@ def ensure_indexes():
     submissions_col().create_index([("assignment_id", ASCENDING)])
 
     messages_col().create_index([("classroom_id", ASCENDING), ("timestamp", ASCENDING)])
+
+    class_materials_col().create_index([("classroom_id", ASCENDING), ("created_at", ASCENDING)])
+    class_materials_col().create_index([("classroom_id", ASCENDING), ("kind", ASCENDING)])
 

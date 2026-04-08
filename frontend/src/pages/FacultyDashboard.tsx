@@ -23,6 +23,7 @@ export function FacultyDashboard() {
   const [description, setDescription] = useState('')
   const [syllabusUrl, setSyllabusUrl] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
+  const [indexingSyllabus, setIndexingSyllabus] = useState(false)
 
   async function load() {
     setError(null)
@@ -45,7 +46,7 @@ export function FacultyDashboard() {
     setError(null)
     setCreating(true)
     try {
-      await apiFetch('/classrooms', {
+      const created = await apiFetch<Classroom>('/classrooms', {
         method: 'POST',
         body: JSON.stringify({
           course_name: courseName,
@@ -54,6 +55,26 @@ export function FacultyDashboard() {
           syllabus_url: syllabusUrl,
         }),
       })
+
+      // If faculty uploaded syllabus, index it for the AI Tutor (optional but recommended)
+      if (syllabusUrl) {
+        setIndexingSyllabus(true)
+        try {
+          await apiFetch(`/ai/classrooms/${created.id}/materials`, {
+            method: 'POST',
+            body: JSON.stringify({
+              kind: 'syllabus',
+              title: `${courseCode || 'Course'} syllabus`,
+              source_url: syllabusUrl,
+            }),
+          })
+        } catch {
+          // Non-fatal: classroom is created even if indexing fails
+        } finally {
+          setIndexingSyllabus(false)
+        }
+      }
+
       setCourseName('')
       setCourseCode('')
       setDescription('')
@@ -110,7 +131,7 @@ export function FacultyDashboard() {
         </div>
         <div className="flex items-center justify-between">
           <div className="text-xs text-slate-500">A class code is generated automatically.</div>
-          <Button loading={creating} onClick={create} type="button">
+          <Button loading={creating || indexingSyllabus} onClick={create} type="button">
             Create
           </Button>
         </div>

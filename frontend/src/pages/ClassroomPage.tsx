@@ -13,6 +13,7 @@ import { SectionHeader } from '../components/SectionHeader'
 import { useAuth } from '../app/AuthContext'
 import type { Classroom } from '../features/classrooms/types'
 import { ChatPanel } from '../features/chat/ChatPanel'
+import { AiTutorPanel } from '../features/ai/AiTutorPanel'
 import { apiFetch } from '../lib/api'
 
 type Assignment = {
@@ -29,6 +30,19 @@ type Assignment = {
 type EvaluationResult = {
   message: string
   feedback: string
+}
+
+type AssignmentHelpResponse = {
+  answer: string
+  steps: string[]
+  tips: string[]
+}
+
+type GradeResponse = {
+  answer: string
+  marks: number
+  steps: string[]
+  tips: string[]
 }
 
 type Submission = {
@@ -70,6 +84,29 @@ export function ClassroomPage() {
 
   // Student's own submissions keyed by assignment id
   const [mySubmissions, setMySubmissions] = useState<Record<string, Submission | null>>({})
+
+  // AI assignment helper
+  const [aiForAssignment, setAiForAssignment] = useState<Assignment | null>(null)
+  const [aiAttempt, setAiAttempt] = useState('')
+  const [aiWantFinal, setAiWantFinal] = useState(false)
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiResult, setAiResult] = useState<AssignmentHelpResponse | null>(null)
+
+  // Faculty materials indexing + tools
+  const [notesUrl, setNotesUrl] = useState<string | null>(null)
+  const [indexing, setIndexing] = useState(false)
+  const [summaryText, setSummaryText] = useState('')
+  const [summaryLoading, setSummaryLoading] = useState(false)
+  const [summaryResult, setSummaryResult] = useState<AssignmentHelpResponse | null>(null)
+  const [quizTopic, setQuizTopic] = useState('')
+  const [quizLoading, setQuizLoading] = useState(false)
+  const [quizResult, setQuizResult] = useState<any | null>(null)
+
+  const [gradeQ, setGradeQ] = useState('')
+  const [gradeA, setGradeA] = useState('')
+  const [gradeRubric, setGradeRubric] = useState('')
+  const [gradeLoading, setGradeLoading] = useState(false)
+  const [gradeResult, setGradeResult] = useState<GradeResponse | null>(null)
 
   const deadlineIso = useMemo(() => {
     if (!newDeadline) return null
@@ -169,6 +206,108 @@ export function ClassroomPage() {
       setError((e as { message?: string })?.message || 'Failed to load submissions')
     } finally {
       setLoadingSubmissionsFor(null)
+    }
+  }
+
+  async function askAiForAssignment() {
+    if (!aiForAssignment) return
+    setError(null)
+    setAiLoading(true)
+    setAiResult(null)
+    try {
+      const qParts = [aiForAssignment.title, aiForAssignment.description || ''].filter(Boolean)
+      const question = qParts.join('\n\n')
+      const res = await apiFetch<AssignmentHelpResponse>('/ai/assignment-help', {
+        method: 'POST',
+        body: JSON.stringify({
+          question,
+          attempt: aiAttempt || null,
+          want_final: aiWantFinal,
+        }),
+      })
+      setAiResult(res)
+    } catch (e) {
+      setError((e as { message?: string })?.message || 'AI help failed')
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
+  async function indexNotes(kind: 'syllabus' | 'notes', title: string, url: string) {
+    setError(null)
+    setIndexing(true)
+    try {
+      await apiFetch(`/ai/classrooms/${classroomId}/materials`, {
+        method: 'POST',
+        body: JSON.stringify({ kind, title, source_url: url }),
+      })
+    } catch (e) {
+      setError((e as { message?: string })?.message || 'Indexing failed')
+    } finally {
+      setIndexing(false)
+    }
+  }
+
+  async function summarizeNow() {
+    const t = summaryText.trim()
+    if (!t) return
+    setError(null)
+    setSummaryLoading(true)
+    setSummaryResult(null)
+    try {
+      const res = await apiFetch<AssignmentHelpResponse>('/ai/summarize', {
+        method: 'POST',
+        body: JSON.stringify({ text: t, style: 'bullets', max_bullets: 10 }),
+      })
+      setSummaryResult(res)
+    } catch (e) {
+      setError((e as { message?: string })?.message || 'Summarize failed')
+    } finally {
+      setSummaryLoading(false)
+    }
+  }
+
+  async function generateQuiz() {
+    const t = quizTopic.trim()
+    if (!t) return
+    setError(null)
+    setQuizLoading(true)
+    setQuizResult(null)
+    try {
+      const res = await apiFetch<any>('/ai/generate-quiz', {
+        method: 'POST',
+        body: JSON.stringify({ topic: t, num_questions: 5, difficulty: 'medium' }),
+      })
+      setQuizResult(res)
+    } catch (e) {
+      setError((e as { message?: string })?.message || 'Quiz generation failed')
+    } finally {
+      setQuizLoading(false)
+    }
+  }
+
+  async function gradeTextAnswer() {
+    const q = gradeQ.trim()
+    const a = gradeA.trim()
+    if (!q || !a) return
+    setError(null)
+    setGradeLoading(true)
+    setGradeResult(null)
+    try {
+      const res = await apiFetch<GradeResponse>('/ai/grade', {
+        method: 'POST',
+        body: JSON.stringify({
+          question: q,
+          student_answer: a,
+          rubric: gradeRubric || null,
+          max_marks: 10,
+        }),
+      })
+      setGradeResult(res)
+    } catch (e) {
+      setError((e as { message?: string })?.message || 'Grading failed')
+    } finally {
+      setGradeLoading(false)
     }
   }
 
@@ -292,6 +431,24 @@ export function ClassroomPage() {
                     </div>
                     {a.description ? (
                       <div className="text-sm text-slate-600">{a.description}</div>
+                    ) : null}
+
+                    {isStudent ? (
+                      <div className="flex items-center justify-end">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          type="button"
+                          onClick={() => {
+                            setAiForAssignment(a)
+                            setAiAttempt('')
+                            setAiWantFinal(false)
+                            setAiResult(null)
+                          }}
+                        >
+                          Ask AI
+                        </Button>
+                      </div>
                     ) : null}
                     {/* Question file link */}
                     {a.file_url ? (
@@ -432,9 +589,227 @@ export function ClassroomPage() {
         </div>
 
         <div className="space-y-4">
+          {isFaculty ? (
+            <Card className="space-y-3">
+              <div className="text-sm font-semibold text-slate-900">AI Tools (Faculty)</div>
+              <div className="text-xs text-slate-600">
+                Upload notes and index them so the AI Tutor can answer based on your class materials.
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+                {notesUrl ? (
+                  <div className="flex items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 py-2">
+                    <span className="flex-1 truncate text-xs text-green-700">✅ Notes uploaded</span>
+                    <a href={notesUrl} target="_blank" rel="noreferrer" className="text-xs text-slate-600 underline">
+                      Preview
+                    </a>
+                    <button
+                      onClick={() => setNotesUrl(null)}
+                      className="text-xs text-red-500 hover:underline"
+                      type="button"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ) : (
+                  <FileUpload
+                    label="Upload notes (PDF)"
+                    bucket="syllabi"
+                    pathPrefix={`notes/${classroomId}`}
+                    onUploaded={(url) => setNotesUrl(url)}
+                  />
+                )}
+
+                <Button
+                  loading={indexing}
+                  disabled={!notesUrl}
+                  onClick={() => notesUrl && indexNotes('notes', 'Class notes', notesUrl)}
+                  type="button"
+                >
+                  Index for AI Tutor
+                </Button>
+              </div>
+
+              <div className="space-y-2">
+                <div className="text-xs font-semibold text-slate-700">Summarize text</div>
+                <textarea
+                  className="min-h-[110px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-400"
+                  placeholder="Paste notes / long answer here…"
+                  value={summaryText}
+                  onChange={(e) => setSummaryText(e.target.value)}
+                />
+                <Button loading={summaryLoading} onClick={summarizeNow} type="button" variant="secondary">
+                  Summarize
+                </Button>
+                {summaryResult ? (
+                  <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
+                    <div className="text-xs font-semibold text-slate-900">Summary</div>
+                    <div className="text-sm text-slate-800 whitespace-pre-wrap">{summaryResult.answer}</div>
+                    {summaryResult.steps?.length ? (
+                      <ul className="list-disc pl-5 text-sm text-slate-700">
+                        {summaryResult.steps.map((s, i) => (
+                          <li key={i}>{s}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="space-y-2">
+                <div className="text-xs font-semibold text-slate-700">Generate quiz</div>
+                <Input label="Topic" value={quizTopic} onChange={(e) => setQuizTopic(e.target.value)} />
+                <Button loading={quizLoading} onClick={generateQuiz} type="button" variant="secondary">
+                  Generate
+                </Button>
+                {quizResult?.questions?.length ? (
+                  <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-3">
+                    <div className="text-xs font-semibold text-slate-900">Quiz</div>
+                    {quizResult.questions.map((q: any, idx: number) => (
+                      <div key={idx} className="space-y-1">
+                        <div className="text-sm font-semibold text-slate-900">
+                          {idx + 1}. {q.q}
+                        </div>
+                        <ul className="list-disc pl-5 text-sm text-slate-700">
+                          {(q.options || []).map((opt: string, oi: number) => (
+                            <li key={oi}>
+                              {opt}{' '}
+                              {q.correct_index === oi ? (
+                                <span className="text-xs font-semibold text-green-700">(answer)</span>
+                              ) : null}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="space-y-2">
+                <div className="text-xs font-semibold text-slate-700">Auto-grade (text)</div>
+                <Input
+                  label="Question"
+                  value={gradeQ}
+                  onChange={(e) => setGradeQ(e.target.value)}
+                  placeholder="Paste question here…"
+                />
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-slate-700">Student answer</label>
+                  <textarea
+                    className="min-h-[90px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-400"
+                    placeholder="Paste student answer text…"
+                    value={gradeA}
+                    onChange={(e) => setGradeA(e.target.value)}
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-slate-700">Rubric (optional)</label>
+                  <textarea
+                    className="min-h-[70px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-400"
+                    placeholder="Key points expected, marking scheme, etc."
+                    value={gradeRubric}
+                    onChange={(e) => setGradeRubric(e.target.value)}
+                  />
+                </div>
+                <Button loading={gradeLoading} onClick={gradeTextAnswer} type="button" variant="secondary">
+                  Grade (out of 10)
+                </Button>
+
+                {gradeResult ? (
+                  <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="text-xs font-semibold text-slate-900">Result</div>
+                      <div className="text-xs font-semibold text-slate-700">{gradeResult.marks} / 10</div>
+                    </div>
+                    <div className="text-sm text-slate-800 whitespace-pre-wrap">{gradeResult.answer}</div>
+                    {gradeResult.steps?.length ? (
+                      <ul className="list-disc pl-5 text-sm text-slate-700">
+                        {gradeResult.steps.map((s, i) => (
+                          <li key={i}>{s}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            </Card>
+          ) : null}
+
+          <AiTutorPanel classroomId={classroomId} />
           <ChatPanel classroomId={classroomId} />
         </div>
       </div>
+
+      {/* AI Assignment Helper modal */}
+      {aiForAssignment ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-2xl rounded-2xl bg-white p-4 shadow-xl space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-slate-900">Ask AI: {aiForAssignment.title}</div>
+                <div className="text-xs text-slate-500">
+                  It will guide you with hints. Enable final answer only if you want it.
+                </div>
+              </div>
+              <button
+                className="rounded-md border border-slate-200 bg-white px-3 py-1 text-sm"
+                onClick={() => setAiForAssignment(null)}
+                type="button"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-xs font-semibold text-slate-700">Your attempt (optional)</div>
+              <textarea
+                className="min-h-[110px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-400"
+                placeholder="Type what you tried so far…"
+                value={aiAttempt}
+                onChange={(e) => setAiAttempt(e.target.value)}
+              />
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={aiWantFinal}
+                  onChange={(e) => setAiWantFinal(e.target.checked)}
+                />
+                Allow final answer
+              </label>
+              <div className="flex justify-end">
+                <Button loading={aiLoading} onClick={askAiForAssignment} type="button">
+                  Ask
+                </Button>
+              </div>
+            </div>
+
+            {aiResult ? (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+                <div className="text-sm font-semibold text-slate-900">AI Help</div>
+                <div className="text-sm text-slate-800 whitespace-pre-wrap">{aiResult.answer}</div>
+                {aiResult.steps?.length ? (
+                  <ul className="list-disc pl-5 text-sm text-slate-700">
+                    {aiResult.steps.map((s, i) => (
+                      <li key={i}>{s}</li>
+                    ))}
+                  </ul>
+                ) : null}
+                {aiResult.tips?.length ? (
+                  <div className="text-sm text-slate-700">
+                    <div className="text-xs font-semibold text-slate-900">Tips</div>
+                    <ul className="list-disc pl-5">
+                      {aiResult.tips.map((t, i) => (
+                        <li key={i}>{t}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

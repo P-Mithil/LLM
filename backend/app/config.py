@@ -24,6 +24,10 @@ def load_config() -> dict:
         # MongoDB
         "MONGODB_URI": os.environ["MONGODB_URI"],
         "MONGODB_DB": os.getenv("MONGODB_DB", "classroom_mvp"),
+        # Groq (LLaMA via Groq Cloud)
         "GROQ_API_KEY": os.getenv("GROQ_API_KEY", ""),
+        "GROQ_CHAT_MODEL": os.getenv("GROQ_CHAT_MODEL", "llama-3.3-70b-versatile"),
+        # Local embeddings model (used for RAG indexing/search)
+        "EMBEDDING_MODEL": os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2"),
     }
 

@@ -4,7 +4,6 @@ import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { ErrorBanner } from '../../components/ErrorBanner'
 import { Loading } from '../../components/Loading'
-import { supabase } from '../../lib/supabaseClient'
 import { apiFetch } from '../../lib/api'
 
 type MessageRow = {
@@ -39,32 +38,11 @@ export function ChatPanel({ classroomId }: { classroomId: string }) {
   useEffect(() => {
     load()
 
-    // Realtime subscription (preferred) + polling fallback.
-    const channel = supabase
-      .channel(`classroom:${classroomId}:messages`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-          filter: `classroom_id=eq.${classroomId}`,
-        },
-        (payload) => {
-          const row = payload.new as MessageRow
-          setMessages((prev) => {
-            if (prev.some((m) => m.id === row.id)) return prev
-            return [...prev, row]
-          })
-        },
-      )
-      .subscribe()
-
+    // Messages are stored in MongoDB (backend). Use polling for MVP simplicity.
     const intervalId = window.setInterval(load, 5000)
 
     return () => {
       window.clearInterval(intervalId)
-      supabase.removeChannel(channel)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [classroomId])

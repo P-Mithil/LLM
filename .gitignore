@@ -10,3 +10,7 @@ node_modules/
 dist/
 build/
 .DS_Store
+backend/data/
+.cursor/
+supabase/.temp/
+tools/
