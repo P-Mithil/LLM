@@ -8,17 +8,42 @@ type Props = PropsWithChildren<
   }
 >
 
-const variants: Record<NonNullable<Props['variant']>, string> = {
-  primary:
-    'bg-slate-900 text-white hover:bg-slate-800 disabled:bg-slate-400 shadow-sm',
-  secondary:
-    'bg-white text-slate-900 border border-slate-200 hover:bg-slate-50 disabled:text-slate-400 shadow-sm',
-  danger: 'bg-rose-600 text-white hover:bg-rose-500 disabled:bg-rose-300 shadow-sm',
+const baseStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: '8px',
+  fontWeight: 500,
+  borderRadius: '10px',
+  border: 'none',
+  cursor: 'pointer',
+  transition: 'all 0.2s ease',
+  fontFamily: 'inherit',
+  letterSpacing: '0.01em',
+  userSelect: 'none',
 }
 
-const sizes: Record<NonNullable<Props['size']>, string> = {
-  sm: 'h-9 px-3 text-sm',
-  md: 'h-10 px-4 text-sm',
+const variants: Record<NonNullable<Props['variant']>, React.CSSProperties> = {
+  primary: {
+    background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+    color: '#fff',
+    boxShadow: '0 0 20px rgba(99,102,241,0.25)',
+  },
+  secondary: {
+    background: 'rgba(255,255,255,0.06)',
+    color: '#cbd5e1',
+    border: '1px solid rgba(255,255,255,0.1)',
+  },
+  danger: {
+    background: 'linear-gradient(135deg, #ef4444, #dc2626)',
+    color: '#fff',
+    boxShadow: '0 0 20px rgba(239,68,68,0.25)',
+  },
+}
+
+const sizes: Record<NonNullable<Props['size']>, React.CSSProperties> = {
+  sm: { height: '34px', padding: '0 12px', fontSize: '0.8rem' },
+  md: { height: '40px', padding: '0 18px', fontSize: '0.875rem' },
 }
 
 export function Button({
@@ -28,22 +53,30 @@ export function Button({
   size = 'md',
   loading,
   disabled,
+  style,
   ...rest
 }: Props) {
+  const isDisabled = disabled || loading
   return (
     <button
       {...rest}
-      disabled={disabled || loading}
-      className={[
-        'inline-flex select-none items-center justify-center gap-2 rounded-md font-medium transition',
-        'focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 active:translate-y-[0.5px]',
-        variants[variant],
-        sizes[size],
-        className,
-      ].join(' ')}
+      disabled={isDisabled}
+      className={className}
+      style={{
+        ...baseStyle,
+        ...variants[variant],
+        ...sizes[size],
+        ...(isDisabled ? { opacity: 0.5, cursor: 'not-allowed' } : {}),
+        ...style,
+      }}
+      onMouseEnter={e => {
+        if (!isDisabled) e.currentTarget.style.filter = 'brightness(1.15)'
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.filter = ''
+      }}
     >
-      {loading ? 'Loading…' : children}
+      {loading ? '⟳ Loading…' : children}
     </button>
   )
 }
-

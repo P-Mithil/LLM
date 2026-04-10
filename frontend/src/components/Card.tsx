@@ -6,13 +6,16 @@ export function Card({
 }: PropsWithChildren<{ className?: string }>) {
   return (
     <div
-      className={[
-        'rounded-2xl border border-slate-200 bg-white p-4 shadow-sm',
-        className,
-      ].join(' ')}
+      className={className}
+      style={{
+        background: 'rgba(255,255,255,0.04)',
+        border: '1px solid rgba(255,255,255,0.08)',
+        borderRadius: '16px',
+        padding: '20px',
+        backdropFilter: 'blur(8px)',
+      }}
     >
       {children}
     </div>
   )
 }
-

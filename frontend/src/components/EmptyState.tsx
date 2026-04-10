@@ -6,10 +6,17 @@ export function EmptyState({
   subtitle?: string
 }) {
   return (
-    <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-6 text-center">
-      <div className="text-sm font-semibold text-slate-900">{title}</div>
-      {subtitle ? <div className="mt-1 text-sm text-slate-600">{subtitle}</div> : null}
+    <div style={{
+      border: '1px dashed rgba(255,255,255,0.1)',
+      borderRadius: '16px',
+      padding: '40px 24px',
+      textAlign: 'center',
+    }}>
+      <div style={{ fontSize: '2rem', marginBottom: '10px' }}>📂</div>
+      <div style={{ fontWeight: 600, fontSize: '0.9rem', color: '#94a3b8' }}>{title}</div>
+      {subtitle ? (
+        <div style={{ marginTop: '4px', fontSize: '0.82rem', color: '#475569' }}>{subtitle}</div>
+      ) : null}
     </div>
   )
 }
-

@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 
 import { Button } from '../components/Button'
 import { Badge } from '../components/Badge'
-import { Card } from '../components/Card'
 import { EmptyState } from '../components/EmptyState'
 import { ErrorBanner } from '../components/ErrorBanner'
 import { FileUpload } from '../components/FileUpload'
@@ -38,9 +37,7 @@ export function FacultyDashboard() {
     }
   }
 
-  useEffect(() => {
-    load()
-  }, [])
+  useEffect(() => { load() }, [])
 
   async function create() {
     setError(null)
@@ -48,37 +45,22 @@ export function FacultyDashboard() {
     try {
       const created = await apiFetch<Classroom>('/classrooms', {
         method: 'POST',
-        body: JSON.stringify({
-          course_name: courseName,
-          course_code: courseCode,
-          description,
-          syllabus_url: syllabusUrl,
-        }),
+        body: JSON.stringify({ course_name: courseName, course_code: courseCode, description, syllabus_url: syllabusUrl }),
       })
 
-      // If faculty uploaded syllabus, index it for the AI Tutor (optional but recommended)
       if (syllabusUrl) {
         setIndexingSyllabus(true)
         try {
           await apiFetch(`/ai/classrooms/${created.id}/materials`, {
             method: 'POST',
-            body: JSON.stringify({
-              kind: 'syllabus',
-              title: `${courseCode || 'Course'} syllabus`,
-              source_url: syllabusUrl,
-            }),
+            body: JSON.stringify({ kind: 'syllabus', title: `${courseCode || 'Course'} syllabus`, source_url: syllabusUrl }),
           })
-        } catch {
-          // Non-fatal: classroom is created even if indexing fails
-        } finally {
+        } catch { /* non-fatal */ } finally {
           setIndexingSyllabus(false)
         }
       }
 
-      setCourseName('')
-      setCourseCode('')
-      setDescription('')
-      setSyllabusUrl(null)
+      setCourseName(''); setCourseCode(''); setDescription(''); setSyllabusUrl(null)
       await load()
     } catch (e) {
       setError((e as { message?: string })?.message || 'Create failed')
@@ -88,63 +70,70 @@ export function FacultyDashboard() {
   }
 
   return (
-    <div className="space-y-6">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       <SectionHeader
         title="Faculty Dashboard"
         subtitle="Create classrooms, upload syllabus, and post assignments."
+        right={<Badge variant="indigo">Faculty</Badge>}
       />
 
-      <Card className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="text-sm font-semibold text-slate-900">Create a classroom</div>
-          <Badge>Faculty</Badge>
-        </div>
-        <div className="grid gap-3 md:grid-cols-2">
-          <Input label="Course name" value={courseName} onChange={(e) => setCourseName(e.target.value)} />
-          <Input label="Course code" value={courseCode} onChange={(e) => setCourseCode(e.target.value)} />
-        </div>
-        <Input
-          label="Description (optional)"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-        />
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-          <FileUpload
-            label="Syllabus (optional)"
-            bucket="syllabi"
-            pathPrefix={`syllabi/${courseCode || 'course'}`}
-            onUploaded={(url) => setSyllabusUrl(url)}
-          />
-          {syllabusUrl ? (
-            <div className="mt-2 text-xs text-slate-600">
-              Uploaded:{' '}
-              <a
-                className="underline underline-offset-4"
-                href={syllabusUrl}
-                target="_blank"
-                rel="noreferrer"
-              >
-                Open syllabus
-              </a>
-            </div>
-          ) : null}
-        </div>
-        <div className="flex items-center justify-between">
-          <div className="text-xs text-slate-500">A class code is generated automatically.</div>
-          <Button loading={creating || indexingSyllabus} onClick={create} type="button">
-            Create
-          </Button>
-        </div>
-      </Card>
-
       {error ? <ErrorBanner message={error} /> : null}
-      {loading ? <Loading /> : null}
 
+      {/* Create classroom card */}
+      <div style={{
+        background: 'rgba(255,255,255,0.04)',
+        border: '1px solid rgba(255,255,255,0.08)',
+        borderRadius: '16px',
+        padding: '24px',
+      }}>
+        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '16px' }}>
+          ＋ Create a Classroom
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+            <Input label="Course name" value={courseName} onChange={(e) => setCourseName(e.target.value)} />
+            <Input label="Course code" value={courseCode} onChange={(e) => setCourseCode(e.target.value)} />
+          </div>
+          <Input label="Description (optional)" value={description} onChange={(e) => setDescription(e.target.value)} />
+
+          <div style={{
+            background: 'rgba(255,255,255,0.03)',
+            border: '1px solid rgba(255,255,255,0.06)',
+            borderRadius: '12px',
+            padding: '14px',
+          }}>
+            <FileUpload
+              label="Syllabus (optional PDF)"
+              bucket="syllabi"
+              pathPrefix={`syllabi/${courseCode || 'course'}`}
+              onUploaded={(url) => setSyllabusUrl(url)}
+            />
+            {syllabusUrl ? (
+              <div style={{ marginTop: '8px', fontSize: '0.8rem', color: '#64748b' }}>
+                ✅ Uploaded —{' '}
+                <a href={syllabusUrl} target="_blank" rel="noreferrer" style={{ color: '#818cf8', textDecoration: 'none' }}>
+                  Open syllabus
+                </a>
+              </div>
+            ) : null}
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: '0.78rem', color: '#475569' }}>A class code is generated automatically.</span>
+            <Button loading={creating || indexingSyllabus} onClick={create} type="button">
+              Create Classroom
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Classrooms grid */}
+      {loading ? <Loading /> : null}
       {!loading && classrooms.length === 0 ? (
         <EmptyState title="No classrooms yet" subtitle="Create your first classroom using the form above." />
       ) : null}
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '16px' }}>
         {classrooms.map((c) => (
           <ClassroomCard key={c.id} classroom={c} />
         ))}
@@ -152,4 +141,3 @@ export function FacultyDashboard() {
     </div>
   )
 }
-

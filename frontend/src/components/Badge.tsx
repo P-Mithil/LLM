@@ -1,18 +1,33 @@
 import type { PropsWithChildren } from 'react'
 
+const styles: Record<string, React.CSSProperties> = {
+  slate: {
+    background: 'rgba(255,255,255,0.06)',
+    color: '#94a3b8',
+    border: '1px solid rgba(255,255,255,0.1)',
+  },
+  indigo: {
+    background: 'rgba(99,102,241,0.15)',
+    color: '#a5b4fc',
+    border: '1px solid rgba(99,102,241,0.3)',
+  },
+}
+
 export function Badge({
   children,
   variant = 'slate',
 }: PropsWithChildren<{ variant?: 'slate' | 'indigo' }>) {
-  const cls =
-    variant === 'indigo'
-      ? 'bg-indigo-50 text-indigo-700 ring-indigo-200'
-      : 'bg-slate-100 text-slate-700 ring-slate-200'
-
   return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${cls}`}>
+    <span style={{
+      display: 'inline-flex',
+      alignItems: 'center',
+      borderRadius: '9999px',
+      padding: '3px 10px',
+      fontSize: '0.72rem',
+      fontWeight: 600,
+      ...styles[variant],
+    }}>
       {children}
     </span>
   )
 }
-
