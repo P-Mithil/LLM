@@ -28,18 +28,14 @@ export function LandingPage() {
             </p>
 
             <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center">
-              <Link to="/auth?role=student" className="w-full sm:w-auto">
-                <Button className="w-full">Continue as Student</Button>
+              <Link to="/auth" className="w-full sm:w-auto">
+                <Button className="w-full">Login</Button>
               </Link>
-              <Link to="/auth?role=faculty" className="w-full sm:w-auto">
+              <Link to="/auth?mode=signup" className="w-full sm:w-auto">
                 <Button variant="secondary" className="w-full">
-                  Continue as Faculty
+                  Sign Up
                 </Button>
               </Link>
-            </div>
-
-            <div className="mt-4 text-xs text-slate-500">
-              Tip: select your role, then login or signup.
             </div>
           </div>
 

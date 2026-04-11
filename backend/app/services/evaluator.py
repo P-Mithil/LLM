@@ -8,62 +8,68 @@ from groq import Groq
 # ────────────────────────────────────────────────
 # Prompt for evaluation (after text is extracted)
 # ────────────────────────────────────────────────
-EVAL_PROMPT = """You are an expert university professor evaluating student assignments.
+EVAL_PROMPT = """You are an AI evaluator for a classroom assignment.
 
-You must evaluate the answer based on the assignment description provided by the faculty.
+Your task is to evaluate a student's answer STRICTLY based on the given rubric and question.
 
---- CONTEXT ---
+INPUT:
 
-Question Title:
-{question}
-
-Assignment Description (expected answer guidance):
-{description}
+* Question: {question}
+* Maximum Marks: {max_marks}
+* Evaluation Criteria (Rubric): {description}
+* Student Answer: {student_answer}
 
 {question_file_section}
 
 ---
 
-Student Name: {student_name}
+EVALUATION RULES:
 
-Student Answer:
-{student_answer}
-
-Maximum Marks: {max_marks}
-
----
-
---- INSTRUCTIONS ---
-
-- Use the description as the expected answer guideline
-- If a Question Paper is provided, use it as the primary reference for what is being asked
-- Check if the student has covered:
-  - key concepts mentioned in description
-  - required explanations
-  - examples (if expected)
-- Do NOT assume anything beyond the description and question paper
-- Be strict and fair
-- Deduct marks for missing key points
+* Evaluate ONLY based on the rubric
+* Be strict but fair
+* Give partial marks if partially correct
+* Do NOT give full marks unless fully correct
+* Do NOT hallucinate
 
 ---
 
---- OUTPUT FORMAT ---
+MARKING STRATEGY:
 
-Student: {student_name}
+* Break marks based on rubric
+* Assign marks for each criterion
+* Total must not exceed max_marks
 
-Marks: <score> / {max_marks}
+---
 
-Reason:
-Brief justification of the score
+OUTPUT FORMAT (STRICT — NO JSON):
 
-Feedback:
-2–4 lines of constructive feedback
+Marks: <marks_obtained>/{max_marks}
+Percentage: <percentage>%
+
+Feedback: <clear explanation of performance>
 
 Strengths:
-- <point>
 
-Improvements:
-- <point>"""
+* point 1
+* point 2
+
+Weaknesses:
+
+* point 1
+* point 2
+
+Rubric Breakdown:
+
+* <criteria 1>: <marks> — <reason>
+* <criteria 2>: <marks> — <reason>
+
+---
+
+IMPORTANT:
+
+* Marks must ALWAYS be present
+* Format must be exactly as above
+* Do NOT output JSON"""
 
 # ────────────────────────────────────────────────
 # Prompt for OCR via vision model

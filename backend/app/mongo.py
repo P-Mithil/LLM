@@ -42,6 +42,10 @@ def class_materials_col():
     return db()["class_materials"]
 
 
+def announcements_col():
+    return db()["announcements"]
+
+
 def ensure_indexes():
     """
     Create Mongo indexes used by the app.
@@ -64,4 +68,6 @@ def ensure_indexes():
 
     class_materials_col().create_index([("classroom_id", ASCENDING), ("created_at", ASCENDING)])
     class_materials_col().create_index([("classroom_id", ASCENDING), ("kind", ASCENDING)])
+
+    announcements_col().create_index([("classroom_id", ASCENDING), ("created_at", ASCENDING)])
 

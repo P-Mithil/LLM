@@ -7,6 +7,7 @@ from .mongo import ensure_indexes
 from .routes.assignments import assignments_bp
 from .routes.auth_routes import auth_bp
 from .routes.ai import ai_bp
+from .routes.announcements import announcements_bp
 from .routes.classrooms import classrooms_bp
 from .routes.health import health_bp
 from .routes.me import me_bp
@@ -34,6 +35,7 @@ def create_app() -> Flask:
     app.register_blueprint(assignments_bp, url_prefix="/api")
     app.register_blueprint(submissions_bp, url_prefix="/api")
     app.register_blueprint(messages_bp, url_prefix="/api")
+    app.register_blueprint(announcements_bp, url_prefix="/api")
     app.register_blueprint(ai_bp, url_prefix="/api")
 
     @app.errorhandler(AuthError)

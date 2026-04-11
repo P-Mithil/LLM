@@ -86,6 +86,8 @@ def ai_chat():
     body = request.get_json(silent=True) or {}
     classroom_id = (body.get("classroom_id") or "").strip()
     question = (body.get("question") or "").strip()
+    mode = (body.get("mode") or "detailed").strip().lower()
+    action = (body.get("action") or "ask").strip().lower()
     if not classroom_id or not question:
         return jsonify({"error": "classroom_id and question are required"}), 400
 
@@ -100,7 +102,11 @@ def ai_chat():
 
     system = (
         "You are a classroom doubt-solver. You MUST use only the provided context. "
-        "If the answer is not present in the context, say you don't know based on the materials and suggest what to check."
+        "If the answer is not present in the context, say you don't know based on the materials and suggest what to check. "
+        f"The user wants the response in {mode} mode. "
+        f"The requested action is {action}. "
+        "If mode is 'beginner', explain simply. If 'exam', focus on exam-oriented bullet points. If 'detailed', provide a comprehensive answer. "
+        "If action is 'explain simply', simplify the explanation. If 'more examples', provide multiple examples. If 'practice questions', only return practice questions. If 'summarize', return a short summary."
     )
     user_msg = (
         f"Context (class materials):\n{context if context else '(no indexed materials)'}\n\n"
@@ -112,6 +118,7 @@ def ai_chat():
   "answer": "string",
   "steps": ["string"],
   "tips": ["string"],
+  "related_topics": ["string"],
   "sources": [{"chunk_id": "string", "title": "string", "source_url": "string"}]
 }"""
 
@@ -132,6 +139,7 @@ def ai_chat():
                 "answer": str(data.get("answer") or ""),
                 "steps": list(data.get("steps") or []),
                 "tips": list(data.get("tips") or []),
+                "related_topics": list(data.get("related_topics") or []),
                 "sources": sources,
             }
         )

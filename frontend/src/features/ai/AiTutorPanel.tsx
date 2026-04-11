@@ -8,6 +8,7 @@ type AiChatResponse = {
   answer: string
   steps: string[]
   tips: string[]
+  related_topics?: string[]
   sources?: { chunk_id?: string; title?: string; source_url?: string }[]
 }
 
@@ -26,6 +27,7 @@ const suggestedQuestions = [
 export function AiTutorPanel({ classroomId }: { classroomId: string }) {
   const [history, setHistory] = useState<Turn[]>([])
   const [text, setText] = useState('')
+  const [mode, setMode] = useState('Detailed')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const listRef = useRef<HTMLDivElement | null>(null)
@@ -34,28 +36,43 @@ export function AiTutorPanel({ classroomId }: { classroomId: string }) {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
   }, [history.length, loading])
 
-  async function ask(question?: string) {
+  async function ask(question?: string, actionName?: string) {
     const q = (question ?? text).trim()
     if (!q) return
     setError(null)
     setLoading(true)
-    setHistory((prev) => [...prev, { role: 'user', text: q }])
+    const act = actionName || 'Ask'
+    setHistory((prev) => [...prev, { role: 'user', text: act === 'Ask' ? q : `[${act}] ${q}` }])
     setText('')
 
     try {
       const res = await apiFetch<AiChatResponse>('/ai/chat', {
         method: 'POST',
-        body: JSON.stringify({ classroom_id: classroomId, question: q }),
+        body: JSON.stringify({ classroom_id: classroomId, question: q, mode, action: act }),
       })
 
       const parts: string[] = []
       if (res.answer) parts.push(res.answer)
       if (res.steps?.length) parts.push(`Steps:\n- ${res.steps.join('\n- ')}`)
       if (res.tips?.length) parts.push(`Tips:\n- ${res.tips.join('\n- ')}`)
+      
+      let finalResponse = parts.join('\n\n') || 'No response.'
+      
+      const metaParts: string[] = []
+      if (res.sources?.length) {
+        metaParts.push(`📄 Source:\n${res.sources.map(s => `- ${s.title || 'Material'}`).join('\n')}`)
+      }
+      if (res.related_topics?.length) {
+        metaParts.push(`💡 Related Topics:\n${res.related_topics.map(t => `- ${t}`).join('\n')}`)
+      }
+
+      if (metaParts.length > 0) {
+        finalResponse += '\n\n--------------------------------\n' + metaParts.join('\n\n') + '\n--------------------------------'
+      }
 
       setHistory((prev) => [
         ...prev,
-        { role: 'assistant', text: parts.join('\n\n') || 'No response.' },
+        { role: 'assistant', text: finalResponse },
       ])
     } catch (e) {
       setError((e as { message?: string })?.message || 'AI chat failed')
@@ -239,55 +256,76 @@ export function AiTutorPanel({ classroomId }: { classroomId: string }) {
         ) : null}
       </div>
 
-      {/* Input */}
+      {/* Input and Controls Area */}
       <div style={{
         padding: '12px 16px',
         borderTop: '1px solid rgba(255,255,255,0.07)',
         display: 'flex',
-        gap: '8px',
-        alignItems: 'center',
+        flexDirection: 'column',
+        gap: '12px',
         flexShrink: 0,
       }}>
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="Ask your doubt about class material…"
-          onKeyDown={(e) => { if (e.key === 'Enter') ask() }}
-          style={{
-            flex: 1,
-            background: 'rgba(255,255,255,0.05)',
-            border: '1px solid rgba(255,255,255,0.1)',
-            borderRadius: '10px',
-            padding: '10px 14px',
-            fontSize: '0.875rem',
-            color: '#e2e8f0',
-            outline: 'none',
-            fontFamily: 'inherit',
-          }}
-          onFocus={e => (e.target.style.borderColor = 'rgba(129,140,248,0.6)')}
-          onBlur={e => (e.target.style.borderColor = 'rgba(255,255,255,0.1)')}
-        />
-        <button
-          onClick={() => ask()}
-          disabled={loading || !text.trim()}
-          style={{
-            height: '40px',
-            padding: '0 16px',
-            background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-            color: '#fff',
-            border: 'none',
-            borderRadius: '10px',
-            fontWeight: 600,
-            fontSize: '0.85rem',
-            cursor: loading || !text.trim() ? 'not-allowed' : 'pointer',
-            opacity: loading || !text.trim() ? 0.5 : 1,
-            transition: 'all 0.2s',
-            fontFamily: 'inherit',
-            flexShrink: 0,
-          }}
-        >
-          Ask ✦
-        </button>
+        <div style={{ fontSize: '0.8rem', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <div style={{ fontWeight: 600, color: '#e2e8f0' }}>Mode:</div>
+          {['Beginner', 'Exam', 'Detailed'].map(m => (
+            <label key={m} style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+              <input
+                type="radio"
+                checked={mode === m}
+                onChange={() => setMode(m)}
+                style={{ accentColor: '#6366f1' }}
+              />
+              {m}
+            </label>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Ask your doubt about class material…"
+            onKeyDown={(e) => { if (e.key === 'Enter') ask() }}
+            style={{
+              flex: 1,
+              background: 'rgba(255,255,255,0.05)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: '10px',
+              padding: '10px 14px',
+              fontSize: '0.875rem',
+              color: '#e2e8f0',
+              outline: 'none',
+              fontFamily: 'inherit',
+            }}
+            onFocus={e => (e.target.style.borderColor = 'rgba(129,140,248,0.6)')}
+            onBlur={e => (e.target.style.borderColor = 'rgba(255,255,255,0.1)')}
+          />
+        </div>
+
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          {['Ask', 'Explain Simply', 'More Examples', 'Practice Questions', 'Summarize'].map(act => (
+            <button
+              key={act}
+              onClick={() => ask(text, act)}
+              disabled={loading || !text.trim()}
+              style={{
+                padding: '8px 14px',
+                background: act === 'Ask' ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'rgba(255,255,255,0.08)',
+                color: act === 'Ask' ? '#fff' : '#e2e8f0',
+                border: act === 'Ask' ? 'none' : '1px solid rgba(255,255,255,0.1)',
+                borderRadius: '8px',
+                fontWeight: 600,
+                fontSize: '0.8rem',
+                cursor: loading || !text.trim() ? 'not-allowed' : 'pointer',
+                opacity: loading || !text.trim() ? 0.5 : 1,
+                transition: 'all 0.2s',
+                fontFamily: 'inherit',
+              }}
+            >
+              {act === 'Ask' ? `${act} ✦` : act}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   )

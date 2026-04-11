@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 import { Button } from '../components/Button'
 import { Badge } from '../components/Badge'
@@ -9,11 +11,13 @@ import { Input } from '../components/Input'
 import { Loading } from '../components/Loading'
 import { FileUpload } from '../components/FileUpload'
 import { SectionHeader } from '../components/SectionHeader'
+import { LeaderboardVisual } from '../components/LeaderboardVisual'
 import { useAuth } from '../app/AuthContext'
 import type { Classroom } from '../features/classrooms/types'
 import { ChatPanel } from '../features/chat/ChatPanel'
 import { AiTutorPanel } from '../features/ai/AiTutorPanel'
 import { apiFetch } from '../lib/api'
+import { uploadPublicFile } from '../lib/storage'
 
 type Assignment = {
   id: string
@@ -53,7 +57,19 @@ type Submission = {
   submitted_at: string
 }
 
-type Tab = 'assignments' | 'ai-tutor' | 'chat' | 'ai-tools'
+type Tab = 'announcements' | 'assignments' | 'leaderboard' | 'ai-tutor' | 'chat' | 'ai-tools'
+
+type Announcement = {
+  id: string
+  classroom_id: string
+  author_id: string
+  author_name?: string
+  author_role?: string
+  body: string
+  file_url?: string | null
+  file_name?: string | null
+  created_at: string
+}
 
 // ─── inline helpers ───────────────────────────────────────────────────────────
 
@@ -93,6 +109,42 @@ const textareaStyle: React.CSSProperties = {
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
+
+function LeaderboardRenderer({ dataStr }: { dataStr: string }) {
+  try {
+    const raw = dataStr.replace(/^```json/i, '').replace(/```$/i, '').trim()
+    const parsed = JSON.parse(raw)
+    if (Array.isArray(parsed) && parsed.length > 0 && ('rank' in parsed[0] || 'name' in parsed[0])) {
+      return <LeaderboardVisual data={parsed} />
+    }
+  } catch (e) {
+    // Ignore: Not JSON, fallback to markdown
+  }
+
+  return (
+    <div className="leaderboard-prose" style={{ width: '100%' }}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          table: ({node, ...props}) => <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '16px', marginBottom: '24px', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', overflow: 'hidden' }} {...props} />,
+          thead: ({node, ...props}) => <thead style={{ background: 'rgba(234,179,8,0.1)', borderBottom: '2px solid rgba(234,179,8,0.2)' }} {...props} />,
+          th: ({node, ...props}) => <th style={{ padding: '14px 16px', textAlign: 'left', color: '#fde047', fontWeight: 600, fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em' }} {...props} />,
+          tbody: ({node, ...props}) => <tbody style={{  }} {...props} />,
+          tr: ({node, ...props}) => <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', transition: 'background 0.2s' }} {...props} />,
+          td: ({node, ...props}) => <td style={{ padding: '14px 16px', color: '#f8fafc', fontSize: '0.9rem' }} {...props} />,
+          h2: ({node, ...props}) => <h2 style={{ fontSize: '1.25rem', color: '#f8fafc', marginTop: '10px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }} {...props} />,
+          p: ({node, ...props}) => <p style={{ color: '#cbd5e1', fontSize: '0.95rem', lineHeight: '1.6', marginBottom: '12px', whiteSpace: 'pre-wrap' }} {...props} />,
+          ul: ({node, ...props}) => <ul style={{ paddingLeft: '24px', color: '#94a3b8', fontSize: '0.9rem', marginBottom: '20px', listStyleType: 'disc' }} {...props} />,
+          li: ({node, ...props}) => <li style={{ marginBottom: '8px' }} {...props} />,
+          hr: ({node, ...props}) => <hr style={{ border: 'none', borderTop: '1px dashed rgba(255,255,255,0.1)', margin: '24px 0' }} {...props} />,
+          strong: ({node, ...props}) => <strong style={{ color: '#e2e8f0', fontWeight: 600 }} {...props} />
+        }}
+      >
+        {dataStr}
+      </ReactMarkdown>
+    </div>
+  )
+}
 
 export function ClassroomPage() {
   const { id } = useParams()
@@ -146,6 +198,29 @@ export function ClassroomPage() {
   const [gradeLoading, setGradeLoading] = useState(false)
   const [gradeResult, setGradeResult] = useState<GradeResponse | null>(null)
 
+  // Per-assignment inline submission state
+  const [submitFiles, setSubmitFiles] = useState<Record<string, File | null>>({})
+  const [submitLoading, setSubmitLoading] = useState<Record<string, boolean>>({})
+  const [showResubmit, setShowResubmit] = useState<Record<string, boolean>>({})
+
+  // Course Leaderboard state
+  const [courseLeaderboard, setCourseLeaderboard] = useState<string | null>(null)
+  const [generatingCourseLeaderboard, setGeneratingCourseLeaderboard] = useState<boolean>(false)
+
+  // Assignment Leaderboard state
+  const [generatingAssignmentLeaderboardFor, setGeneratingAssignmentLeaderboardFor] = useState<string | null>(null)
+  const [assignmentLeaderboards, setAssignmentLeaderboards] = useState<Record<string, string>>({})
+
+  // Announcements
+  const [announcements, setAnnouncements] = useState<Announcement[]>([])
+  const [announcementsLoaded, setAnnouncementsLoaded] = useState(false)
+  const [announcementBody, setAnnouncementBody] = useState('')
+  const [annFileUrl, setAnnFileUrl] = useState<string | null>(null)
+  const [annFileName, setAnnFileName] = useState<string | null>(null)
+  const [annAttaching, setAnnAttaching] = useState(false)
+  const annFileInputRef = useRef<HTMLInputElement>(null)
+  const [postingAnnouncement, setPostingAnnouncement] = useState(false)
+
   const deadlineIso = useMemo(() => {
     if (!newDeadline) return null
     const d = new Date(newDeadline)
@@ -175,6 +250,8 @@ export function ClassroomPage() {
         )
         setMySubmissions(mine)
       }
+      
+      a.forEach(assignment => loadAssignmentLeaderboard(assignment.id))
     } catch (e) {
       setError((e as { message?: string })?.message || 'Failed to load classroom')
     } finally {
@@ -185,6 +262,7 @@ export function ClassroomPage() {
   useEffect(() => {
     if (!classroomId) return
     load()
+    loadCourseLeaderboard()
   }, [classroomId])
 
   async function createAssignment() {
@@ -224,6 +302,55 @@ export function ClassroomPage() {
       setError((e as { message?: string })?.message || 'Evaluation failed')
     } finally {
       setEvaluatingSubmission(null)
+    }
+  }
+
+  async function loadCourseLeaderboard() {
+    try {
+      const res = await apiFetch<{ leaderboard: string }>(`/classrooms/${classroomId}/leaderboard`)
+      setCourseLeaderboard(res.leaderboard || null)
+    } catch {
+      // Ignore errors for uninitialized leaderboards
+    }
+  }
+
+  async function generateCourseLeaderboard() {
+    setGeneratingCourseLeaderboard(true)
+    setError(null)
+    try {
+      const res = await apiFetch<{ leaderboard: string }>(`/classrooms/${classroomId}/leaderboard/generate`, {
+        method: 'POST',
+      })
+      setCourseLeaderboard(res.leaderboard)
+      setActiveTab('leaderboard')
+    } catch (e) {
+      setError((e as { message?: string })?.message || 'Failed to generate cumulative leaderboard')
+    } finally {
+      setGeneratingCourseLeaderboard(false)
+    }
+  }
+
+  async function loadAssignmentLeaderboard(assignmentId: string) {
+    try {
+      const res = await apiFetch<{ leaderboard: string }>(`/assignments/${assignmentId}/leaderboard`)
+      if (res.leaderboard) setAssignmentLeaderboards(prev => ({ ...prev, [assignmentId]: res.leaderboard }))
+    } catch {
+      // Ignore errors for uninitialized leaderboards
+    }
+  }
+
+  async function generateAssignmentLeaderboard(assignmentId: string) {
+    setError(null)
+    setGeneratingAssignmentLeaderboardFor(assignmentId)
+    try {
+      const res = await apiFetch<{ leaderboard: string }>(`/assignments/${assignmentId}/leaderboard/generate`, {
+        method: 'POST',
+      })
+      setAssignmentLeaderboards(prev => ({ ...prev, [assignmentId]: res.leaderboard }))
+    } catch (e) {
+      setError((e as { message?: string })?.message || 'Failed to generate assignment leaderboard')
+    } finally {
+      setGeneratingAssignmentLeaderboardFor(null)
     }
   }
 
@@ -322,13 +449,86 @@ export function ClassroomPage() {
     }
   }
 
+  async function handleSubmitFile(assignmentId: string, file: File) {
+    setSubmitLoading((prev) => ({ ...prev, [assignmentId]: true }))
+    setError(null)
+    try {
+      const safeName = file.name.replaceAll(' ', '_')
+      const path = `submissions/${assignmentId}/${crypto.randomUUID()}-${safeName}`
+      const url = await uploadPublicFile({ bucket: 'submissions', path, file })
+      await apiFetch(`/assignments/${assignmentId}/submissions`, {
+        method: 'POST',
+        body: JSON.stringify({ file_url: url }),
+      })
+      const sub = await apiFetch<Submission | null>(`/assignments/${assignmentId}/my-submission`)
+      setMySubmissions((prev) => ({ ...prev, [assignmentId]: sub }))
+      setSubmitFiles((prev) => ({ ...prev, [assignmentId]: null }))
+      setShowResubmit((prev) => ({ ...prev, [assignmentId]: false }))
+    } catch (e) {
+      setError((e as { message?: string })?.message || 'Submission failed')
+    } finally {
+      setSubmitLoading((prev) => ({ ...prev, [assignmentId]: false }))
+    }
+  }
+
+  async function loadAnnouncements() {
+    try {
+      const rows = await apiFetch<Announcement[]>(`/classrooms/${classroomId}/announcements`)
+      setAnnouncements(rows)
+    } catch {
+      // endpoint may not exist yet — silently ignore
+    } finally {
+      setAnnouncementsLoaded(true)
+    }
+  }
+
+  async function attachAnnFile(file: File) {
+    setAnnAttaching(true)
+    try {
+      const safeName = file.name.replaceAll(' ', '_')
+      const path = `announcements/${classroomId}/${crypto.randomUUID()}-${safeName}`
+      const url = await uploadPublicFile({ bucket: 'assignments', path, file })
+      setAnnFileUrl(url)
+      setAnnFileName(file.name)
+    } catch (e) {
+      setError((e as { message?: string })?.message || 'File upload failed')
+    } finally {
+      setAnnAttaching(false)
+    }
+  }
+
+  async function postAnnouncement() {
+    if (!announcementBody.trim() && !annFileUrl) return
+    setPostingAnnouncement(true)
+    try {
+      const created = await apiFetch<Announcement>(`/classrooms/${classroomId}/announcements`, {
+        method: 'POST',
+        body: JSON.stringify({
+          body: announcementBody.trim(),
+          file_url: annFileUrl || null,
+          file_name: annFileName || null,
+        }),
+      })
+      setAnnouncements((prev) => [created, ...prev])
+      setAnnouncementBody('')
+      setAnnFileUrl(null)
+      setAnnFileName(null)
+    } catch (e) {
+      setError((e as { message?: string })?.message || 'Failed to post announcement')
+    } finally {
+      setPostingAnnouncement(false)
+    }
+  }
+
   if (loading) return <Loading />
   if (error) return <ErrorBanner message={error} />
   if (!classroom) return <ErrorBanner message="Classroom not found." />
 
   // Tab definitions — AI Tutor visible to everyone (students ask doubts, faculty also)
   const tabs: { id: Tab; label: string; icon: string; show?: boolean }[] = [
+    { id: 'announcements', label: 'Announcements', icon: '📢' },
     { id: 'assignments', label: 'Assignments', icon: '📋' },
+    { id: 'leaderboard', label: 'Leaderboard', icon: '🏆' },
     { id: 'ai-tutor', label: isStudent ? 'Ask AI Tutor' : 'AI Tutor', icon: '✦' },
     { id: 'chat', label: 'Chat', icon: '💬' },
     { id: 'ai-tools', label: 'AI Tools', icon: '⚙️', show: isFaculty },
@@ -388,7 +588,10 @@ export function ClassroomPage() {
         {tabs.map(tab => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => {
+              setActiveTab(tab.id)
+              if (tab.id === 'announcements' && !announcementsLoaded) loadAnnouncements()
+            }}
             style={{
               flex: 1,
               padding: '9px 16px',
@@ -423,6 +626,256 @@ export function ClassroomPage() {
 
       {/* Tab Content */}
       <div>
+
+        {/* ══ ANNOUNCEMENTS TAB ══ */}
+        {activeTab === 'announcements' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+
+            {/* Composer: faculty AND students can post */}
+            {(isFaculty || isStudent) && (
+              <div style={cardStyle}>
+                <div style={sectionLabel}>
+                  {isFaculty ? '📢 New Announcement' : '✏️ Share with the Class'}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <textarea
+                    style={{
+                      ...textareaStyle,
+                      minHeight: '100px',
+                      fontSize: '0.9rem',
+                      borderColor: isStudent ? 'rgba(20,184,166,0.3)' : undefined,
+                    }}
+                    placeholder={
+                      isFaculty
+                        ? 'Share something with the class — updates, reminders, resources…'
+                        : 'Ask a question, share a resource, or post a note for everyone…'
+                    }
+                    value={announcementBody}
+                    onChange={(e) => setAnnouncementBody(e.target.value)}
+                  />
+                  {/* Attached file preview */}
+                  {annFileUrl && (
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: '8px',
+                      background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.2)',
+                      borderRadius: '10px', padding: '8px 12px',
+                    }}>
+                      <span style={{ fontSize: '1rem' }}>📎</span>
+                      <span style={{ flex: 1, fontSize: '0.8rem', color: '#4ade80', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {annFileName}
+                      </span>
+                      <button
+                        onClick={() => { setAnnFileUrl(null); setAnnFileName(null) }}
+                        style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: '0.8rem', flexShrink: 0 }}
+                      >
+                        ✕ Remove
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Bottom toolbar: attach + post button */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                    {/* Hidden file input */}
+                    <input
+                      ref={annFileInputRef}
+                      type="file"
+                      style={{ display: 'none' }}
+                      onChange={(e) => { const f = e.target.files?.[0]; if (f) attachAnnFile(f); e.target.value = '' }}
+                    />
+                    <button
+                      type="button"
+                      disabled={annAttaching}
+                      onClick={() => annFileInputRef.current?.click()}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: '6px',
+                        background: annAttaching ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.07)',
+                        border: '1px solid rgba(255,255,255,0.12)',
+                        borderRadius: '8px', padding: '7px 14px',
+                        fontSize: '0.82rem', color: '#94a3b8',
+                        cursor: annAttaching ? 'not-allowed' : 'pointer',
+                        fontFamily: 'inherit',
+                        transition: 'all 0.2s',
+                      }}
+                    >
+                      {annAttaching ? '⏳ Uploading…' : '📎 Attach file'}
+                    </button>
+                    <Button
+                      loading={postingAnnouncement}
+                      onClick={postAnnouncement}
+                      type="button"
+                      disabled={!announcementBody.trim() && !annFileUrl}
+                    >
+                      {isFaculty ? 'Post →' : 'Share →'}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Announcement feed */}
+            {!announcementsLoaded ? (
+              <Loading />
+            ) : announcements.length === 0 ? (
+              <div style={{
+                textAlign: 'center',
+                padding: '48px 20px',
+                background: 'rgba(255,255,255,0.02)',
+                border: '1px solid rgba(255,255,255,0.06)',
+                borderRadius: '14px',
+              }}>
+                <div style={{ fontSize: '2.5rem', marginBottom: '12px' }}>📢</div>
+                <div style={{ fontSize: '1rem', fontWeight: 600, color: '#cbd5e1', marginBottom: '6px' }}>
+                  No announcements yet
+                </div>
+                <div style={{ fontSize: '0.85rem', color: '#475569' }}>
+                  {isFaculty
+                    ? 'Post an announcement above to notify your students.'
+                    : 'No messages yet. Be the first to share something!'}
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {announcements.map((ann) => (
+                  <div
+                    key={ann.id}
+                    style={{
+                      background: 'rgba(255,255,255,0.03)',
+                      border: '1px solid rgba(255,255,255,0.07)',
+                      borderRadius: '14px',
+                      padding: '18px 20px',
+                      position: 'relative',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    {/* Left accent bar — teal for students, indigo for faculty */}
+                    <div style={{
+                      position: 'absolute',
+                      left: 0, top: 0, bottom: 0,
+                      width: '4px',
+                      background: ann.author_role === 'student'
+                        ? 'linear-gradient(180deg, #14b8a6, #06b6d4)'
+                        : 'linear-gradient(180deg, #6366f1, #8b5cf6)',
+                      borderRadius: '14px 0 0 14px',
+                    }} />
+                    <div style={{ paddingLeft: '12px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+                        {/* Avatar — teal for students */}
+                        <div style={{
+                          width: '34px', height: '34px', borderRadius: '50%',
+                          background: ann.author_role === 'student'
+                            ? 'linear-gradient(135deg, #14b8a6, #06b6d4)'
+                            : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: '0.85rem', fontWeight: 700, color: '#fff', flexShrink: 0,
+                        }}>
+                          {(ann.author_name ?? (ann.author_role === 'student' ? 'S' : 'F'))[0].toUpperCase()}
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <div style={{ fontSize: '0.82rem', fontWeight: 600, color: '#e2e8f0' }}>
+                              {ann.author_name ?? (ann.author_role === 'student' ? 'Student' : 'Faculty')}
+                            </div>
+                            <span style={{
+                              fontSize: '0.65rem',
+                              fontWeight: 700,
+                              padding: '1px 6px',
+                              borderRadius: '999px',
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.05em',
+                              background: ann.author_role === 'student'
+                                ? 'rgba(20,184,166,0.15)'
+                                : 'rgba(99,102,241,0.15)',
+                              color: ann.author_role === 'student' ? '#2dd4bf' : '#a5b4fc',
+                            }}>
+                              {ann.author_role === 'student' ? 'Student' : 'Faculty'}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: '0.72rem', color: '#475569' }}>
+                            {new Date(ann.created_at).toLocaleString()}
+                          </div>
+                        </div>
+                      </div>
+                      {ann.body && (
+                        <div style={{ fontSize: '0.9rem', color: '#cbd5e1', lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>
+                          {ann.body}
+                        </div>
+                      )}
+
+                      {/* File attachment — prominent full-width card */}
+                      {ann.file_url && (
+                        <a
+                          href={ann.file_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '14px',
+                            marginTop: ann.body ? '14px' : '0',
+                            background: ann.author_role === 'student'
+                              ? 'rgba(20,184,166,0.08)'
+                              : 'rgba(99,102,241,0.08)',
+                            border: ann.author_role === 'student'
+                              ? '1px solid rgba(20,184,166,0.25)'
+                              : '1px solid rgba(99,102,241,0.25)',
+                            borderRadius: '12px',
+                            padding: '14px 16px',
+                            textDecoration: 'none',
+                            width: '100%',
+                            boxSizing: 'border-box',
+                            transition: 'background 0.2s',
+                          }}
+                        >
+                          {/* File icon */}
+                          <div style={{
+                            width: '44px', height: '44px', borderRadius: '10px', flexShrink: 0,
+                            background: ann.author_role === 'student'
+                              ? 'rgba(20,184,166,0.18)'
+                              : 'rgba(99,102,241,0.18)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontSize: '1.4rem',
+                          }}>
+                            📄
+                          </div>
+                          {/* File info */}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{
+                              fontSize: '0.88rem', fontWeight: 700,
+                              color: ann.author_role === 'student' ? '#2dd4bf' : '#a5b4fc',
+                              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                            }}>
+                              {ann.file_name || 'Attached file'}
+                            </div>
+                            <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '2px' }}>
+                              Click to open • attached by {ann.author_role === 'student' ? 'student' : 'faculty'}
+                            </div>
+                          </div>
+                          {/* CTA */}
+                          <div style={{
+                            flexShrink: 0,
+                            background: ann.author_role === 'student'
+                              ? 'rgba(20,184,166,0.2)'
+                              : 'rgba(99,102,241,0.2)',
+                            color: ann.author_role === 'student' ? '#2dd4bf' : '#a5b4fc',
+                            border: 'none',
+                            borderRadius: '8px',
+                            padding: '6px 14px',
+                            fontSize: '0.8rem',
+                            fontWeight: 700,
+                          }}>
+                            Open ↗
+                          </div>
+                        </a>
+                      )}
+
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ══ ASSIGNMENTS TAB ══ */}
         {activeTab === 'assignments' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -543,16 +996,18 @@ export function ClassroomPage() {
                               target="_blank"
                               rel="noreferrer"
                               style={{
-                                fontSize: '0.78rem',
-                                color: '#94a3b8',
-                                background: 'rgba(255,255,255,0.05)',
-                                border: '1px solid rgba(255,255,255,0.1)',
+                                display: 'inline-flex', alignItems: 'center', gap: '8px',
+                                fontSize: '0.82rem',
+                                color: '#a5b4fc',
+                                background: 'rgba(99,102,241,0.12)',
+                                border: '1px solid rgba(99,102,241,0.3)',
                                 borderRadius: '8px',
-                                padding: '4px 10px',
+                                padding: '5px 12px',
                                 textDecoration: 'none',
+                                fontWeight: 600,
                               }}
                             >
-                              📄 Paper
+                              📄 View Paper
                             </a>
                           ) : null}
                         </div>
@@ -575,53 +1030,151 @@ export function ClassroomPage() {
                             }}>
                               ⛔ Deadline has passed. Submissions are closed.
                             </div>
-                          ) : (
-                            <div style={{
-                              background: 'rgba(255,255,255,0.03)',
-                              border: '1px solid rgba(255,255,255,0.06)',
-                              borderRadius: '12px', padding: '12px',
-                            }}>
-                              <FileUpload
-                                label={mySub ? 'Re-submit file' : 'Submit file'}
-                                bucket="submissions"
-                                pathPrefix={`submissions/${a.id}`}
-                                onUploaded={async (url) => {
-                                  try {
-                                    await apiFetch(`/assignments/${a.id}/submissions`, {
-                                      method: 'POST',
-                                      body: JSON.stringify({ file_url: url }),
-                                    })
-                                    const sub = await apiFetch<Submission | null>(`/assignments/${a.id}/my-submission`)
-                                    setMySubmissions((prev) => ({ ...prev, [a.id]: sub }))
-                                  } catch (e) {
-                                    setError((e as { message?: string })?.message || 'Submission failed')
-                                  }
-                                }}
-                              />
-                            </div>
-                          )}
+                          ) : (() => {
+                            const chosenFile = submitFiles[a.id] || null
+                            const isUploading = !!submitLoading[a.id]
+                            return (
+                              <div style={{
+                                background: 'rgba(255,255,255,0.02)',
+                                border: '1px dashed rgba(255,255,255,0.12)',
+                                borderRadius: '14px',
+                                padding: '16px',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '12px',
+                              }}>
+                                <div style={{ fontSize: '0.78rem', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                                  {mySub ? '🔄 Replace Submission' : '📤 Submit Your Work'}
+                                </div>
 
-                          {mySub ? (
-                            <div style={{
-                              background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.2)',
-                              borderRadius: '10px', padding: '8px 12px',
-                              fontSize: '0.82rem', color: '#4ade80',
-                            }}>
-                              ✅ Submitted on {new Date(mySub.submitted_at).toLocaleString()}
-                            </div>
-                          ) : null}
+                                {/* File picker area */}
+                                <label style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '12px',
+                                  background: chosenFile ? 'rgba(99,102,241,0.08)' : 'rgba(255,255,255,0.03)',
+                                  border: chosenFile ? '1px solid rgba(99,102,241,0.3)' : '1px solid rgba(255,255,255,0.08)',
+                                  borderRadius: '10px',
+                                  padding: '12px 14px',
+                                  cursor: isUploading ? 'not-allowed' : 'pointer',
+                                  transition: 'all 0.2s',
+                                }}>
+                                  <input
+                                    type="file"
+                                    style={{ display: 'none' }}
+                                    disabled={isUploading}
+                                    onChange={(e) => {
+                                      const f = e.target.files?.[0] || null
+                                      setSubmitFiles((prev) => ({ ...prev, [a.id]: f }))
+                                      e.target.value = ''
+                                    }}
+                                  />
+                                  <div style={{
+                                    width: '36px', height: '36px', borderRadius: '8px', flexShrink: 0,
+                                    background: chosenFile ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.06)',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    fontSize: '1.1rem',
+                                  }}>
+                                    {chosenFile ? '📄' : '📁'}
+                                  </div>
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    {chosenFile ? (
+                                      <>
+                                        <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#a5b4fc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                          {chosenFile.name}
+                                        </div>
+                                        <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: '2px' }}>
+                                          {(chosenFile.size / 1024).toFixed(1)} KB · click to change
+                                        </div>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <div style={{ fontSize: '0.85rem', color: '#94a3b8' }}>Click to choose a file</div>
+                                        <div style={{ fontSize: '0.72rem', color: '#475569', marginTop: '2px' }}>PDF, image, doc, etc.</div>
+                                      </>
+                                    )}
+                                  </div>
+                                  {chosenFile && !isUploading && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => { e.preventDefault(); setSubmitFiles((prev) => ({ ...prev, [a.id]: null })) }}
+                                      style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: '0.8rem', flexShrink: 0, padding: '4px' }}
+                                    >
+                                      ✕
+                                    </button>
+                                  )}
+                                </label>
 
-                          {mySub?.evaluation_feedback ? (
-                            <div style={{
-                              background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)',
-                              borderRadius: '12px', padding: '14px',
-                            }}>
-                              <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#a5b4fc', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px' }}>
-                                📋 Your Result
+                                {/* Submit button */}
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                                  {mySub && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setShowResubmit((prev) => ({ ...prev, [a.id]: false }))}
+                                      style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '0.8rem', fontFamily: 'inherit' }}
+                                    >
+                                      ← Cancel
+                                    </button>
+                                  )}
+                                  <Button
+                                    loading={isUploading}
+                                    disabled={!chosenFile}
+                                    type="button"
+                                    onClick={() => chosenFile && handleSubmitFile(a.id, chosenFile)}
+                                    style={{ marginLeft: 'auto' }}
+                                  >
+                                    {isUploading ? 'Uploading…' : mySub ? '🔄 Re-submit' : '📤 Submit'}
+                                  </Button>
+                                </div>
                               </div>
-                              <pre style={{ whiteSpace: 'pre-wrap', fontSize: '0.85rem', color: '#cbd5e1', fontFamily: 'inherit', margin: 0 }}>
-                                {mySub.evaluation_feedback}
-                              </pre>
+                            )
+                          })()}
+
+                          {/* Submission status + re-submit CTA */}
+                          {mySub && !showResubmit[a.id] ? (
+                            <div style={{
+                              background: 'rgba(34,197,94,0.06)',
+                              border: '1px solid rgba(34,197,94,0.2)',
+                              borderRadius: '12px',
+                              padding: '12px 14px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '12px',
+                            }}>
+                              <span style={{ fontSize: '1.2rem', flexShrink: 0 }}>✅</span>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#4ade80' }}>Submitted</div>
+                                <div style={{ fontSize: '0.72rem', color: '#86efac', marginTop: '2px' }}>
+                                  {new Date(mySub.submitted_at).toLocaleString()}
+                                </div>
+                                <a
+                                  href={mySub.file_url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  style={{ fontSize: '0.72rem', color: '#6ee7b7', textDecoration: 'none', display: 'inline-block', marginTop: '4px' }}
+                                >
+                                  📄 View submitted file ↗
+                                </a>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setShowResubmit((prev) => ({ ...prev, [a.id]: true }))}
+                                style={{
+                                  flexShrink: 0,
+                                  background: 'rgba(34,197,94,0.15)',
+                                  border: '1px solid rgba(34,197,94,0.3)',
+                                  borderRadius: '8px',
+                                  padding: '6px 14px',
+                                  fontSize: '0.78rem',
+                                  fontWeight: 600,
+                                  color: '#4ade80',
+                                  cursor: 'pointer',
+                                  fontFamily: 'inherit',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                🔄 Replace
+                              </button>
                             </div>
                           ) : null}
 
@@ -653,15 +1206,26 @@ export function ClassroomPage() {
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                             <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Student Submissions</span>
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              loading={loadingSubmissionsFor === a.id}
-                              onClick={() => loadSubmissions(a.id)}
-                              type="button"
-                            >
-                              View
-                            </Button>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                loading={generatingAssignmentLeaderboardFor === a.id}
+                                onClick={() => generateAssignmentLeaderboard(a.id)}
+                                type="button"
+                              >
+                                {assignmentLeaderboards[a.id] ? 'Update Leaderboard' : 'Generate Leaderboard'}
+                              </Button>
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                loading={loadingSubmissionsFor === a.id}
+                                onClick={() => loadSubmissions(a.id)}
+                                type="button"
+                              >
+                                View Submissions
+                              </Button>
+                            </div>
                           </div>
 
                           {submissionsByAssignment[a.id] ? (
@@ -721,9 +1285,63 @@ export function ClassroomPage() {
                           ) : null}
                         </div>
                       ) : null}
+                      
+                      {/* Assignment Leaderboard display */}
+                      {assignmentLeaderboards[a.id] ? (
+                         <div style={{
+                          background: 'rgba(255,255,255,0.02)',
+                          border: '1px solid rgba(234,179,8,0.2)',
+                          borderRadius: '12px',
+                          padding: '16px',
+                          marginTop: '8px',
+                          boxShadow: 'inset 0 0 20px rgba(234,179,8,0.02)'
+                        }}>
+                          <LeaderboardRenderer dataStr={assignmentLeaderboards[a.id]} />
+                        </div>
+                      ) : null}
                     </div>
                   )
                 })
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ══ LEADERBOARD TAB ══ */}
+        {activeTab === 'leaderboard' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div style={cardStyle}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={sectionLabel}>🏆 Cumulative Leaderboard</div>
+                {isFaculty && (
+                  <Button
+                    loading={generatingCourseLeaderboard}
+                    onClick={generateCourseLeaderboard}
+                    type="button"
+                  >
+                     {courseLeaderboard ? 'Update Leaderboard' : 'Generate Leaderboard'}
+                  </Button>
+                )}
+              </div>
+              <p style={{ fontSize: '0.85rem', color: '#64748b' }}>
+                Cumulative rankings and statistics compiled across all assignments in this course.
+              </p>
+              
+              {courseLeaderboard ? (
+                <div style={{
+                  background: 'rgba(255,255,255,0.02)',
+                  border: '1px solid rgba(234,179,8,0.2)',
+                  borderRadius: '12px',
+                  padding: '24px',
+                  marginTop: '16px',
+                  boxShadow: 'inset 0 0 40px rgba(234,179,8,0.02)'
+                }}>
+                  <LeaderboardRenderer dataStr={courseLeaderboard} />
+                </div>
+              ) : (
+                <div style={{ marginTop: '20px' }}>
+                  <EmptyState icon="🏆" message="No leaderboard generated for this course yet." />
+                </div>
               )}
             </div>
           </div>

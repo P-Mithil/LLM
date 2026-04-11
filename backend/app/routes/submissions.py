@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from bson import ObjectId
 from flask import Blueprint, jsonify, request, current_app
 from ..auth_app import require_auth, require_role
-from ..mongo import assignments_col, classrooms_col, enrollments_col, submissions_col, users_col
+from ..mongo import announcements_col, assignments_col, classrooms_col, enrollments_col, submissions_col, users_col
 from ..services.evaluator import evaluate_submission
 
 
@@ -182,4 +182,3 @@ def evaluate_student_submission(assignment_id: str, submission_id: str):
     )
 
     return jsonify({"message": "Evaluation successful", "feedback": feedback})
-
